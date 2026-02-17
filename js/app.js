@@ -15,6 +15,84 @@ let textSearchQuery = ''; // 实时文本搜索查询
 let previousActiveKeywords = null; // 文本搜索激活时，暂存之前的关键词激活集合
 let previousActiveAuthors = null; // 文本搜索激活时，暂存之前的作者激活集合
 
+function initDataSourceSwitch() {
+  const sourceSwitch = document.getElementById('dataSourceSwitch');
+  if (!sourceSwitch || typeof DATA_CONFIG === 'undefined') {
+    return;
+  }
+
+  const optionButtons = Array.from(
+    sourceSwitch.querySelectorAll('.data-source-option')
+  );
+
+  const syncSwitchState = () => {
+    const currentMode = DATA_CONFIG.getSourceMode();
+    sourceSwitch.dataset.mode = currentMode;
+    optionButtons.forEach(button => {
+      const isActive = button.dataset.mode === currentMode;
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  };
+
+  const reloadDataBySource = async () => {
+    const container = document.getElementById('paperContainer');
+    const isLocalMode = DATA_CONFIG.isLocalMode();
+
+    if (container) {
+      container.innerHTML = `
+        <div class="loading-container">
+          <div class="loading-spinner"></div>
+          <p>Loading papers from ${isLocalMode ? 'local files' : 'remote repository'}...</p>
+        </div>
+      `;
+    }
+
+    availableDates = [];
+    paperData = {};
+    currentCategory = 'all';
+    currentDate = '';
+    window.dateLanguageMap = new Map();
+
+    await fetchAvailableDates();
+
+    if (availableDates.length > 0) {
+      await loadPapersByDate(availableDates[0]);
+      return;
+    }
+
+    if (container) {
+      container.innerHTML = `
+        <div class="loading-container">
+          <p>No papers found in ${isLocalMode ? 'local files' : 'remote repository'}.</p>
+        </div>
+      `;
+    }
+
+    renderCategoryFilter({ sortedCategories: [], categoryCounts: {} });
+    const dateLabel = document.getElementById('currentDate');
+    if (dateLabel) {
+      dateLabel.textContent = 'No Data';
+    }
+  };
+
+  optionButtons.forEach(button => {
+    button.addEventListener('click', async () => {
+      const nextMode = button.dataset.mode;
+      if (nextMode === DATA_CONFIG.getSourceMode()) {
+        return;
+      }
+
+      DATA_CONFIG.setSourceMode(nextMode);
+      syncSwitchState();
+      await reloadDataBySource();
+    });
+  });
+
+  window.addEventListener('data-source-changed', syncSwitchState);
+  syncSwitchState();
+}
+
 // 加载用户的关键词设置
 function loadUserKeywords() {
   const savedKeywords = localStorage.getItem('preferredKeywords');
@@ -209,6 +287,7 @@ function toggleAuthorFilter(author) {
 
 document.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
+  initDataSourceSwitch();
   
   fetchGitHubStats();
   

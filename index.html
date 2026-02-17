@@ -16,7 +16,7 @@
     <script src="js/auth-config.js"></script>
     <script src="js/auth.js"></script>
     <!-- Data Source Configuration -->
-    <script src="js/data-config.js"></script>
+    <script src="js/data-config.js?v=1.1.0"></script>
     <script>
         // Check authentication on page load
         Auth.requireAuth();
@@ -86,6 +86,10 @@
                 </div>
                 
                 <div class="header-controls">
+                    <div class="data-source-switch" id="dataSourceSwitch" role="group" aria-label="Data Source Switch">
+                        <button type="button" class="data-source-option" data-mode="remote" title="Load from GitHub remote data">Remote</button>
+                        <button type="button" class="data-source-option" data-mode="local" title="Load from local generated files">Local</button>
+                    </div>
                     <div class="date-selector">
                         <div class="date-display">
                             <span id="currentDate">Loading...</span>
@@ -242,6 +246,6 @@
         </svg>
     </button>
 
-    <script src="js/app.js?v=1.0.1"></script>
+    <script src="js/app.js?v=1.1.0"></script>
 </body>
 </html> 
