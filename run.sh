@@ -9,8 +9,22 @@ echo "=== 本地调试环境检查 / Local Debug Environment Check ==="
 if [ -z "$TOKEN_GITHUB" ]; then
     echo "⚠️  提示：未设置 TOKEN_GITHUB / Warning: TOKEN_GITHUB not set"
     echo "可能导致 GitHub 相关功能受限 / May limit GitHub related functionalities"
-fi
+else
     echo "✅ TOKEN_GITHUB 已设置 / TOKEN_GITHUB is set"
+fi
+
+# SOCKS 代理环境检查 / SOCKS proxy environment check
+PROXY_CANDIDATE="${ALL_PROXY:-${all_proxy:-${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}}}"
+if [[ "$PROXY_CANDIDATE" == socks* ]]; then
+    if ! python -c "import socksio" >/dev/null 2>&1; then
+        echo "❌ 检测到 SOCKS 代理，但缺少 socksio 依赖 / SOCKS proxy detected, but socksio is missing"
+        echo "请先执行：uv add socksio 或 source .venv/bin/activate && uv sync"
+        echo "Then rerun: bash run.sh"
+        exit 1
+    else
+        echo "✅ SOCKS 代理环境可用（socksio 已安装） / SOCKS proxy environment ready (socksio installed)"
+    fi
+fi
 
 # 检查必需的环境变量 / Check required environment variables
 if [ -z "$OPENAI_API_KEY" ]; then

@@ -5,6 +5,82 @@ let flatpickrInstance = null;
 let isRangeMode = false;
 let allPapersData = [];
 
+function initDataSourceSwitch() {
+  const sourceSwitch = document.getElementById('dataSourceSwitch');
+  if (!sourceSwitch || typeof DATA_CONFIG === 'undefined') {
+    return;
+  }
+
+  const optionButtons = Array.from(
+    sourceSwitch.querySelectorAll('.data-source-option')
+  );
+
+  const syncSwitchState = () => {
+    const currentMode = DATA_CONFIG.getSourceMode();
+    sourceSwitch.dataset.mode = currentMode;
+    optionButtons.forEach(button => {
+      const isActive = button.dataset.mode === currentMode;
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  };
+
+  const reloadStatisticsBySource = async () => {
+    const container = document.getElementById('papersList');
+    const isLocalMode = DATA_CONFIG.isLocalMode();
+
+    if (container) {
+      container.innerHTML = `
+        <div class="loading">
+          Loading papers from ${isLocalMode ? 'local files' : 'remote repository'}...
+        </div>
+      `;
+    }
+
+    availableDates = [];
+    paperData = {};
+    allPapersData = [];
+    currentDate = '';
+    window.dateLanguageMap = new Map();
+
+    await fetchAvailableDates();
+
+    if (availableDates.length > 0) {
+      await loadPapersByDateRange(availableDates[0], availableDates[0]);
+      return;
+    }
+
+    if (container) {
+      container.innerHTML = `
+        <div class="no-data">
+          No papers found in ${isLocalMode ? 'local files' : 'remote repository'}.
+        </div>
+      `;
+    }
+
+    const dateLabel = document.getElementById('currentDate');
+    if (dateLabel) {
+      dateLabel.textContent = 'No Data';
+    }
+  };
+
+  optionButtons.forEach(button => {
+    button.addEventListener('click', async () => {
+      const nextMode = button.dataset.mode;
+      if (nextMode === DATA_CONFIG.getSourceMode()) {
+        return;
+      }
+
+      DATA_CONFIG.setSourceMode(nextMode);
+      syncSwitchState();
+      await reloadStatisticsBySource();
+    });
+  });
+
+  window.addEventListener('data-source-changed', syncSwitchState);
+  syncSwitchState();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // Check screen size
   const checkScreenSize = () => {
@@ -27,6 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('resize', checkScreenSize);
 
   initEventListeners();
+  initDataSourceSwitch();
   fetchGitHubStats();
   
   fetchAvailableDates().then(() => {
