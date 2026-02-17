@@ -17,6 +17,28 @@ class ArxivSpider(scrapy.Spider):
     name = "arxiv"  # 爬虫名称
     allowed_domains = ["arxiv.org"]  # 允许爬取的域名
 
+    @staticmethod
+    def _clean_text(value: str) -> str:
+        if not value:
+            return ""
+        return re.sub(r"\s+", " ", value).strip()
+
+    def _extract_categories(self, paper_dd) -> list[str]:
+        # 优先从 primary-subject 里拿，然后再从完整 subjects 文本里补充
+        primary_subject_text = self._clean_text(
+            "".join(paper_dd.css(".list-subjects .primary-subject::text").getall())
+        )
+        full_subject_text = self._clean_text(
+            "".join(paper_dd.css(".list-subjects::text").getall())
+        )
+        merged_subject_text = " ".join(
+            [x for x in [primary_subject_text, full_subject_text] if x]
+        )
+        categories_in_paper = re.findall(r"\(([^)]+)\)", merged_subject_text)
+        cleaned = [c.strip() for c in categories_in_paper if c.strip()]
+        # 保持顺序去重
+        return list(dict.fromkeys(cleaned))
+
     def parse(self, response):
         # 提取每篇论文的信息
         anchors = []
@@ -46,32 +68,38 @@ class ArxivSpider(scrapy.Spider):
             paper_dd = paper.xpath("following-sibling::dd[1]")
             if not paper_dd:
                 continue
-            
-            # 提取论文分类信息 - 在subjects部分
-            subjects_text = paper_dd.css(".list-subjects .primary-subject::text").get()
-            if not subjects_text:
-                # 如果找不到主分类，尝试其他方式获取分类
-                subjects_text = paper_dd.css(".list-subjects::text").get()
-            
-            if subjects_text:
-                # 解析分类信息，通常格式如 "Computer Vision and Pattern Recognition (cs.CV)"
-                # 提取括号中的分类代码
-                categories_in_paper = re.findall(r'\(([^)]+)\)', subjects_text)
-                
-                # 检查论文分类是否与目标分类有交集
-                paper_categories = set(categories_in_paper)
-                if paper_categories.intersection(self.target_categories):
-                    yield {
-                        "id": arxiv_id,
-                        "categories": list(paper_categories),  # 添加分类信息用于调试
-                    }
-                    self.logger.info(f"Found paper {arxiv_id} with categories {paper_categories}")
-                else:
-                    self.logger.debug(f"Skipped paper {arxiv_id} with categories {paper_categories} (not in target {self.target_categories})")
-            else:
-                # 如果无法获取分类信息，记录警告但仍然返回论文（保持向后兼容）
-                self.logger.warning(f"Could not extract categories for paper {arxiv_id}, including anyway")
+
+            categories = self._extract_categories(paper_dd)
+            category_set = set(categories)
+
+            # 标题、作者、摘要、评论直接从 list 页面提取，避免逐篇 API 请求导致慢速
+            title_raw = "".join(paper_dd.css(".list-title::text").getall())
+            title = self._clean_text(title_raw.replace("Title:", "", 1))
+            authors = [
+                self._clean_text(a)
+                for a in paper_dd.css(".list-authors a::text").getall()
+                if self._clean_text(a)
+            ]
+            summary = self._clean_text(" ".join(paper_dd.css("p.mathjax::text").getall()))
+            comment_raw = "".join(paper_dd.css(".list-comments::text").getall())
+            comment = self._clean_text(comment_raw.replace("Comments:", "", 1))
+            comment = comment or None
+
+            if not category_set or category_set.intersection(self.target_categories):
                 yield {
                     "id": arxiv_id,
-                    "categories": [],
+                    "pdf": f"https://arxiv.org/pdf/{arxiv_id}",
+                    "abs": f"https://arxiv.org/abs/{arxiv_id}",
+                    "authors": authors,
+                    "title": title,
+                    "categories": categories,
+                    "comment": comment,
+                    "summary": summary,
                 }
+                self.logger.debug(
+                    f"Found paper {arxiv_id} with categories {category_set if category_set else set()}"
+                )
+            else:
+                self.logger.debug(
+                    f"Skipped paper {arxiv_id} with categories {category_set} (not in target {self.target_categories})"
+                )

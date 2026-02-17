@@ -14,6 +14,17 @@ let currentFilteredPapers = []; // 当前过滤后的论文列表
 let textSearchQuery = ''; // 实时文本搜索查询
 let previousActiveKeywords = null; // 文本搜索激活时，暂存之前的关键词激活集合
 let previousActiveAuthors = null; // 文本搜索激活时，暂存之前的作者激活集合
+const ALLOWED_CATEGORIES = ['cs.AI', 'cs.RO', 'cs.CL', 'cs.CV'];
+const OTHER_CATEGORY_KEY = 'other';
+const CATEGORY_ORDER = [...ALLOWED_CATEGORIES, OTHER_CATEGORY_KEY];
+
+function useLocalCategoryRules() {
+  return (
+    typeof DATA_CONFIG !== 'undefined' &&
+    typeof DATA_CONFIG.isLocalMode === 'function' &&
+    DATA_CONFIG.isLocalMode()
+  );
+}
 
 function initDataSourceSwitch() {
   const sourceSwitch = document.getElementById('dataSourceSwitch');
@@ -43,7 +54,7 @@ function initDataSourceSwitch() {
       container.innerHTML = `
         <div class="loading-container">
           <div class="loading-spinner"></div>
-          <p>Loading papers from ${isLocalMode ? 'local files' : 'remote repository'}...</p>
+          <p>Loading papers from ${isLocalMode ? 'local' : 'remote repository'}...</p>
         </div>
       `;
     }
@@ -64,7 +75,7 @@ function initDataSourceSwitch() {
     if (container) {
       container.innerHTML = `
         <div class="loading-container">
-          <p>No papers found in ${isLocalMode ? 'local files' : 'remote repository'}.</p>
+          <p>No papers found in ${isLocalMode ? 'local' : 'remote repository'}.</p>
         </div>
       `;
     }
@@ -305,18 +316,25 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function fetchGitHubStats() {
+  const starCountEl = document.getElementById('starCount');
+  const forkCountEl = document.getElementById('forkCount');
+
+  if (!starCountEl || !forkCountEl) {
+    return;
+  }
+
   try {
     const response = await fetch('https://api.github.com/repos/dw-dengwei/daily-arXiv-ai-enhanced');
     const data = await response.json();
     const starCount = data.stargazers_count;
     const forkCount = data.forks_count;
     
-    document.getElementById('starCount').textContent = starCount;
-    document.getElementById('forkCount').textContent = forkCount;
+    starCountEl.textContent = starCount;
+    forkCountEl.textContent = forkCount;
   } catch (error) {
     console.error('获取GitHub统计数据失败:', error);
-    document.getElementById('starCount').textContent = '?';
-    document.getElementById('forkCount').textContent = '?';
+    starCountEl.textContent = '?';
+    forkCountEl.textContent = '?';
   }
 }
 
@@ -771,6 +789,9 @@ async function loadPapersByDate(date) {
     }
     
     paperData = parseJsonlData(text, date);
+    if (currentCategory !== 'all' && !paperData[currentCategory]) {
+      currentCategory = 'all';
+    }
     
     const categories = getAllCategories(paperData);
     
@@ -789,7 +810,13 @@ async function loadPapersByDate(date) {
 }
 
 function parseJsonlData(jsonlText, date) {
+  const useLocalRules = useLocalCategoryRules();
   const result = {};
+  if (useLocalRules) {
+    CATEGORY_ORDER.forEach(category => {
+      result[category] = [];
+    });
+  }
   
   const lines = jsonlText.trim().split('\n');
   
@@ -802,16 +829,23 @@ function parseJsonlData(jsonlText, date) {
       }
       
       let allCategories = Array.isArray(paper.categories) ? paper.categories : [paper.categories];
-      
+
       const primaryCategory = allCategories[0];
+      if (!primaryCategory) {
+        return;
+      }
+
+      const categoryBucket = useLocalRules
+        ? (ALLOWED_CATEGORIES.includes(primaryCategory) ? primaryCategory : OTHER_CATEGORY_KEY)
+        : primaryCategory;
       
-      if (!result[primaryCategory]) {
-        result[primaryCategory] = [];
+      if (!result[categoryBucket]) {
+        result[categoryBucket] = [];
       }
       
       const summary = paper.AI && paper.AI.tldr ? paper.AI.tldr : paper.summary;
       
-      result[primaryCategory].push({
+      result[categoryBucket].push({
         title: paper.title,
         url: paper.abs || paper.pdf || `https://arxiv.org/abs/${paper.id}`,
         authors: Array.isArray(paper.authors) ? paper.authors.join(', ') : paper.authors,
@@ -838,17 +872,26 @@ function parseJsonlData(jsonlText, date) {
 
 // 获取所有类别并按偏好排序
 function getAllCategories(data) {
-  const categories = Object.keys(data);
   const catePaperCount = {};
-  
+
+  if (useLocalCategoryRules()) {
+    CATEGORY_ORDER.forEach(category => {
+      catePaperCount[category] = data[category] ? data[category].length : 0;
+    });
+
+    return {
+      sortedCategories: [...CATEGORY_ORDER],
+      categoryCounts: catePaperCount
+    };
+  }
+
+  const categories = Object.keys(data);
   categories.forEach(category => {
     catePaperCount[category] = data[category] ? data[category].length : 0;
   });
-  
+
   return {
-    sortedCategories: categories.sort((a, b) => {
-      return a.localeCompare(b);
-    }),
+    sortedCategories: categories.sort((a, b) => a.localeCompare(b)),
     categoryCounts: catePaperCount
   };
 }
@@ -868,9 +911,10 @@ function renderCategoryFilter(categories) {
   
   sortedCategories.forEach(category => {
     const count = categoryCounts[category];
+    const categoryLabel = useLocalCategoryRules() && category === OTHER_CATEGORY_KEY ? 'Other' : category;
     const button = document.createElement('button');
     button.className = `category-button ${category === currentCategory ? 'active' : ''}`;
-    button.innerHTML = `${category}<span class="category-count">${count}</span>`;
+    button.innerHTML = `${categoryLabel}<span class="category-count">${count}</span>`;
     button.dataset.category = category;
     button.addEventListener('click', () => {
       filterByCategory(category);
@@ -980,6 +1024,10 @@ function renderPapers() {
   const container = document.getElementById('paperContainer');
   container.innerHTML = '';
   container.className = `paper-container ${currentView === 'list' ? 'list-view' : ''}`;
+
+  if (currentCategory !== 'all' && !paperData[currentCategory]) {
+    currentCategory = 'all';
+  }
   
   let papers = [];
   if (currentCategory === 'all') {

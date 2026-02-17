@@ -1,6 +1,8 @@
 /**
  * Data Source Configuration
- * Supports both remote GitHub data and local file data.
+ * Supports two GitHub data sources:
+ * - remote: current repository data branch
+ * - local:  personal repository data branch
  */
 
 const DATA_CONFIG = {
@@ -25,11 +27,18 @@ const DATA_CONFIG = {
     /**
      * Data source switch mode
      * - remote: fetch from raw.githubusercontent.com
-     * - local: fetch from local files served by current origin
+     * - local: fetch from personal GitHub data branch
      */
     sourceMode: 'local',
     sourceModeStorageKey: 'arxiv_data_source_mode',
     defaultSourceMode: 'local',
+
+    /**
+     * Personal repository data source (used when sourceMode is local)
+     */
+    localRepoOwner: 'wangtianci2004',
+    localRepoName: 'daily-arXiv-ai-enhanced',
+    localDataBranch: 'data',
 
     normalizeMode: function(mode) {
         const normalized = String(mode || '').trim().toLowerCase();
@@ -94,7 +103,7 @@ const DATA_CONFIG = {
      */
     getDataBaseUrl: function() {
         if (this.isLocalMode()) {
-            return '';
+            return `https://raw.githubusercontent.com/${this.localRepoOwner}/${this.localRepoName}/${this.localDataBranch}`;
         }
         return `https://raw.githubusercontent.com/${this.repoOwner}/${this.repoName}/${this.dataBranch}`;
     },

@@ -22,6 +22,9 @@ from langchain.prompts import (
 )
 from structure import Structure
 
+DEFAULT_MAX_WORKERS = 20
+MAX_ALLOWED_WORKERS = 20
+
 if os.path.exists('.env'):
     dotenv.load_dotenv()
 template = open("template.txt", "r").read()
@@ -29,10 +32,32 @@ system = open("system.txt", "r").read()
 
 def parse_args():
     """解析命令行参数"""
+    env_workers_raw = os.environ.get("AI_MAX_WORKERS", str(DEFAULT_MAX_WORKERS))
+    try:
+        env_workers = int(env_workers_raw)
+    except (TypeError, ValueError):
+        env_workers = DEFAULT_MAX_WORKERS
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, required=True, help="jsonline data file")
-    parser.add_argument("--max_workers", type=int, default=1, help="Maximum number of parallel workers")
-    return parser.parse_args()
+    parser.add_argument(
+        "--max_workers",
+        type=int,
+        default=env_workers,
+        help=f"Maximum number of parallel workers (default from AI_MAX_WORKERS, fallback {DEFAULT_MAX_WORKERS}, hard cap {MAX_ALLOWED_WORKERS})"
+    )
+
+    args = parser.parse_args()
+    if args.max_workers < 1:
+        print("max_workers < 1, reset to 1", file=sys.stderr)
+        args.max_workers = 1
+    if args.max_workers > MAX_ALLOWED_WORKERS:
+        print(
+            f"max_workers > {MAX_ALLOWED_WORKERS}, capped to {MAX_ALLOWED_WORKERS}",
+            file=sys.stderr
+        )
+        args.max_workers = MAX_ALLOWED_WORKERS
+    return args
 
 def process_single_item(chain, item: Dict, language: str) -> Dict:
     def is_sensitive(content: str) -> bool:
@@ -168,7 +193,9 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
 def process_all_items(data: List[Dict], model_name: str, language: str, max_workers: int) -> List[Dict]:
     """并行处理所有数据项"""
     llm = ChatOpenAI(model=model_name).with_structured_output(Structure, method="function_calling")
+    effective_workers = max(1, min(max_workers, len(data) if data else 1))
     print('Connect to:', model_name, file=sys.stderr)
+    print(f'AI workers: requested={max_workers}, effective={effective_workers}', file=sys.stderr)
     
     prompt_template = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(system),
@@ -179,7 +206,7 @@ def process_all_items(data: List[Dict], model_name: str, language: str, max_work
     
     # 使用线程池并行处理
     processed_data = [None] * len(data)  # 预分配结果列表
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
         # 提交所有任务
         future_to_idx = {
             executor.submit(process_single_item, chain, item, language): idx

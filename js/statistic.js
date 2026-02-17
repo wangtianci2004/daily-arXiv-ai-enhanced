@@ -32,7 +32,7 @@ function initDataSourceSwitch() {
     if (container) {
       container.innerHTML = `
         <div class="loading">
-          Loading papers from ${isLocalMode ? 'local files' : 'remote repository'}...
+          Loading papers from ${isLocalMode ? 'local' : 'remote repository'}...
         </div>
       `;
     }
@@ -53,7 +53,7 @@ function initDataSourceSwitch() {
     if (container) {
       container.innerHTML = `
         <div class="no-data">
-          No papers found in ${isLocalMode ? 'local files' : 'remote repository'}.
+          No papers found in ${isLocalMode ? 'local' : 'remote repository'}.
         </div>
       `;
     }

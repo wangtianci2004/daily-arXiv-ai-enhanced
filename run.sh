@@ -39,6 +39,7 @@ if [ -z "$OPENAI_API_KEY" ]; then
     echo "   export LANGUAGE=\"Chinese\"                           # 语言设置 / Language setting"
     echo "   export CATEGORIES=\"cs.CV, cs.CL\"                    # 关注分类 / Categories of interest"
     echo "   export MODEL_NAME=\"gpt-4o-mini\"                     # 模型名称 / Model name"
+    echo "   export AI_MAX_WORKERS=\"20\"                          # AI并发数 / AI parallel workers (max 20)"
     echo ""
     echo "💡 设置后重新运行此脚本即可进行完整测试 / After setting, rerun this script for complete testing"
     echo "🚀 或者继续运行部分流程（爬取+去重检查）/ Or continue with partial workflow (crawl + dedup check)"
@@ -58,12 +59,14 @@ else
     export CATEGORIES="${CATEGORIES:-cs.CV, cs.CL}"
     export MODEL_NAME="${MODEL_NAME:-gpt-4o-mini}"
     export OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+    export AI_MAX_WORKERS="${AI_MAX_WORKERS:-20}"
     
     echo "🔧 当前配置 / Current configuration:"
     echo "   LANGUAGE: $LANGUAGE"
     echo "   CATEGORIES: $CATEGORIES"
     echo "   MODEL_NAME: $MODEL_NAME"
     echo "   OPENAI_BASE_URL: $OPENAI_BASE_URL"
+    echo "   AI_MAX_WORKERS: $AI_MAX_WORKERS"
 fi
 
 echo ""
@@ -123,7 +126,7 @@ cd ..
 if [ "$PARTIAL_MODE" = "false" ]; then
     echo "步骤3：AI增强处理... / Step 3: AI enhancement processing..."
     cd ai
-    python enhance.py --data ../data/${today}.jsonl
+    python enhance.py --data ../data/${today}.jsonl --max_workers "${AI_MAX_WORKERS}"
     
     if [ $? -ne 0 ]; then
         echo "❌ AI处理失败 / AI processing failed"

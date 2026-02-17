@@ -1269,7 +1269,7 @@ input:checked + .toggle-slider:before {
   }
   
   .header-left {
-    display: none;
+    display: flex;
   }
   
   .header-controls {
