@@ -4,7 +4,7 @@
 
 本项目旨在实现 **axriv 每日论文抓取 + AI 增强摘要生成**，以便持续跟踪 AI 领域前沿研究进展，提升论文筛选阅读效率。
 
-- 上游仓库（Upstream）：[dw-dengwei/daily-arXiv-ai-enhanced](https://github.com/dw-dengwei/daily-arXiv-ai-enhanced)
+- 上游仓库（Upstream）：[wangtianci2004/daily-arXiv-ai-enhanced](https://github.com/wangtianci2004/daily-arXiv-ai-enhanced)
 - 当前维护分支（Fork）：[wangtianci2004/daily-arXiv-ai-enhanced](https://github.com/wangtianci2004/daily-arXiv-ai-enhanced)
 
 ## 工作流

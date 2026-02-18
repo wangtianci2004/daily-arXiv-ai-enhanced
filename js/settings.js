@@ -380,17 +380,23 @@ function showNotification(message, type = 'success') {
 
 // 获取GitHub统计数据
 async function fetchGitHubStats() {
+  const starCountEl = document.getElementById('starCount');
+  const forkCountEl = document.getElementById('forkCount');
+  if (!starCountEl || !forkCountEl) {
+    return;
+  }
+
   try {
-    const response = await fetch('https://api.github.com/repos/dw-dengwei/daily-arXiv-ai-enhanced');
+    const response = await fetch('https://api.github.com/repos/wangtianci2004/daily-arXiv-ai-enhanced');
     const data = await response.json();
     const starCount = data.stargazers_count;
     const forkCount = data.forks_count;
     
-    document.getElementById('starCount').textContent = starCount;
-    document.getElementById('forkCount').textContent = forkCount;
+    starCountEl.textContent = starCount;
+    forkCountEl.textContent = forkCount;
   } catch (error) {
     console.error('获取GitHub统计数据失败:', error);
-    document.getElementById('starCount').textContent = '?';
-    document.getElementById('forkCount').textContent = '?';
+    starCountEl.textContent = '?';
+    forkCountEl.textContent = '?';
   }
-} 
+}

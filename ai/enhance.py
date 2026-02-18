@@ -2,6 +2,8 @@ import os
 import json
 import sys
 import re
+import time
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict
 from queue import Queue
@@ -24,6 +26,8 @@ from structure import Structure
 
 DEFAULT_MAX_WORKERS = 20
 MAX_ALLOWED_WORKERS = 20
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_BASE_DELAY = 1.5
 
 if os.path.exists('.env'):
     dotenv.load_dotenv()
@@ -33,10 +37,20 @@ system = open("system.txt", "r").read()
 def parse_args():
     """解析命令行参数"""
     env_workers_raw = os.environ.get("AI_MAX_WORKERS", str(DEFAULT_MAX_WORKERS))
+    env_retries_raw = os.environ.get("AI_MAX_RETRIES", str(DEFAULT_MAX_RETRIES))
+    env_retry_delay_raw = os.environ.get("AI_RETRY_BASE_DELAY", str(DEFAULT_RETRY_BASE_DELAY))
     try:
         env_workers = int(env_workers_raw)
     except (TypeError, ValueError):
         env_workers = DEFAULT_MAX_WORKERS
+    try:
+        env_retries = int(env_retries_raw)
+    except (TypeError, ValueError):
+        env_retries = DEFAULT_MAX_RETRIES
+    try:
+        env_retry_delay = float(env_retry_delay_raw)
+    except (TypeError, ValueError):
+        env_retry_delay = DEFAULT_RETRY_BASE_DELAY
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, required=True, help="jsonline data file")
@@ -45,6 +59,18 @@ def parse_args():
         type=int,
         default=env_workers,
         help=f"Maximum number of parallel workers (default from AI_MAX_WORKERS, fallback {DEFAULT_MAX_WORKERS}, hard cap {MAX_ALLOWED_WORKERS})"
+    )
+    parser.add_argument(
+        "--max_retries",
+        type=int,
+        default=env_retries,
+        help=f"Maximum retry times for one AI request (default from AI_MAX_RETRIES, fallback {DEFAULT_MAX_RETRIES})"
+    )
+    parser.add_argument(
+        "--retry_base_delay",
+        type=float,
+        default=env_retry_delay,
+        help=f"Base delay seconds for exponential backoff (default from AI_RETRY_BASE_DELAY, fallback {DEFAULT_RETRY_BASE_DELAY})"
     )
 
     args = parser.parse_args()
@@ -57,9 +83,38 @@ def parse_args():
             file=sys.stderr
         )
         args.max_workers = MAX_ALLOWED_WORKERS
+    if args.max_retries < 0:
+        print("max_retries < 0, reset to 0", file=sys.stderr)
+        args.max_retries = 0
+    if args.retry_base_delay <= 0:
+        print(f"retry_base_delay <= 0, reset to {DEFAULT_RETRY_BASE_DELAY}", file=sys.stderr)
+        args.retry_base_delay = DEFAULT_RETRY_BASE_DELAY
     return args
 
-def process_single_item(chain, item: Dict, language: str) -> Dict:
+def process_single_item(chain, item: Dict, language: str, max_retries: int, retry_base_delay: float) -> Dict:
+    item_id = item.get("id", "unknown")
+
+    def is_retryable_llm_error(error: Exception) -> bool:
+        """Only retry transient infra/provider errors."""
+        message = str(error).lower()
+        retry_keywords = [
+            "429",
+            "rate limit",
+            "timeout",
+            "timed out",
+            "connection",
+            "service unavailable",
+            "bad gateway",
+            "502",
+            "503",
+            "504",
+            "temporarily",
+            "try again",
+            "overloaded",
+            "apierror",
+        ]
+        return any(keyword in message for keyword in retry_keywords)
+
     def is_sensitive(content: str) -> bool:
         """
         调用 spam.dw-dengwei.workers.dev 接口检测内容是否包含敏感词。
@@ -148,36 +203,51 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         "result": "Result analysis unavailable",
         "conclusion": "Conclusion extraction failed"
     }
-    
-    try:
-        response: Structure = chain.invoke({
-            "language": language,
-            "content": item['summary']
-        })
-        item['AI'] = response.model_dump()
-    except langchain_core.exceptions.OutputParserException as e:
-        # 尝试从错误信息中提取 JSON 字符串并修复
-        error_msg = str(e)
-        partial_data = {}
-        
-        if "Function Structure arguments:" in error_msg:
-            try:
-                # 提取 JSON 字符串
-                json_str = error_msg.split("Function Structure arguments:", 1)[1].strip().split('are not valid JSON')[0].strip()
-                # 预处理 LaTeX 数学符号 - 使用四个反斜杠来确保正确转义
-                json_str = json_str.replace('\\', '\\\\')
-                # 尝试解析修复后的 JSON
-                partial_data = json.loads(json_str)
-            except Exception as json_e:
-                print(f"Failed to parse JSON for {item.get('id', 'unknown')}: {json_e}", file=sys.stderr)
-        
-        # Merge partial data with defaults to ensure all fields exist
-        item['AI'] = {**default_ai_fields, **partial_data}
-        print(f"Using partial AI data for {item.get('id', 'unknown')}: {list(partial_data.keys())}", file=sys.stderr)
-    except Exception as e:
-        # Catch any other exceptions and provide default values
-        print(f"Unexpected error for {item.get('id', 'unknown')}: {e}", file=sys.stderr)
-        item['AI'] = default_ai_fields
+
+    for attempt in range(max_retries + 1):
+        try:
+            response: Structure = chain.invoke({
+                "language": language,
+                "content": item['summary']
+            })
+            item['AI'] = response.model_dump()
+            break
+        except langchain_core.exceptions.OutputParserException as e:
+            # 尝试从错误信息中提取 JSON 字符串并修复
+            error_msg = str(e)
+            partial_data = {}
+
+            if "Function Structure arguments:" in error_msg:
+                try:
+                    # 提取 JSON 字符串
+                    json_str = error_msg.split("Function Structure arguments:", 1)[1].strip().split('are not valid JSON')[0].strip()
+                    # 预处理 LaTeX 数学符号 - 使用四个反斜杠来确保正确转义
+                    json_str = json_str.replace('\\', '\\\\')
+                    # 尝试解析修复后的 JSON
+                    partial_data = json.loads(json_str)
+                except Exception as json_e:
+                    print(f"Failed to parse JSON for {item_id}: {json_e}", file=sys.stderr)
+
+            # Merge partial data with defaults to ensure all fields exist
+            item['AI'] = {**default_ai_fields, **partial_data}
+            print(f"Using partial AI data for {item_id}: {list(partial_data.keys())}", file=sys.stderr)
+            break
+        except Exception as e:
+            last_attempt = attempt >= max_retries
+            if (not last_attempt) and is_retryable_llm_error(e):
+                backoff = retry_base_delay * (2 ** attempt) + random.uniform(0, retry_base_delay)
+                print(
+                    f"Retrying AI generation for {item_id} ({attempt + 1}/{max_retries}) "
+                    f"after transient error: {e}. sleep={backoff:.2f}s",
+                    file=sys.stderr
+                )
+                time.sleep(backoff)
+                continue
+
+            # Catch non-retryable errors or exhausted retries and provide default values
+            print(f"Unexpected error for {item_id}: {e}", file=sys.stderr)
+            item['AI'] = default_ai_fields
+            break
     
     # Final validation to ensure all required fields exist
     for field in default_ai_fields.keys():
@@ -190,12 +260,23 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
             return None
     return item
 
-def process_all_items(data: List[Dict], model_name: str, language: str, max_workers: int) -> List[Dict]:
+def process_all_items(
+    data: List[Dict],
+    model_name: str,
+    language: str,
+    max_workers: int,
+    max_retries: int,
+    retry_base_delay: float,
+) -> List[Dict]:
     """并行处理所有数据项"""
     llm = ChatOpenAI(model=model_name).with_structured_output(Structure, method="function_calling")
     effective_workers = max(1, min(max_workers, len(data) if data else 1))
     print('Connect to:', model_name, file=sys.stderr)
     print(f'AI workers: requested={max_workers}, effective={effective_workers}', file=sys.stderr)
+    print(
+        f'AI retry config: max_retries={max_retries}, retry_base_delay={retry_base_delay}s',
+        file=sys.stderr
+    )
     
     prompt_template = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(system),
@@ -209,7 +290,14 @@ def process_all_items(data: List[Dict], model_name: str, language: str, max_work
     with ThreadPoolExecutor(max_workers=effective_workers) as executor:
         # 提交所有任务
         future_to_idx = {
-            executor.submit(process_single_item, chain, item, language): idx
+            executor.submit(
+                process_single_item,
+                chain,
+                item,
+                language,
+                max_retries,
+                retry_base_delay,
+            ): idx
             for idx, item in enumerate(data)
         }
         
@@ -270,7 +358,9 @@ def main():
         data,
         model_name,
         language,
-        args.max_workers
+        args.max_workers,
+        args.max_retries,
+        args.retry_base_delay,
     )
     
     # 保存结果
