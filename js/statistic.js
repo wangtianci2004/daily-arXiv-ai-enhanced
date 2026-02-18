@@ -82,26 +82,6 @@ function initDataSourceSwitch() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Check screen size
-  const checkScreenSize = () => {
-    if (window.innerWidth < 768) {
-      const warningModal = document.createElement('div');
-      warningModal.className = 'screen-size-warning';
-      warningModal.innerHTML = `
-        <div class="warning-content">
-          <h3>⚠️ Screen Size Notice</h3>
-          <p>We've detected that you're using a device with a small screen. For the best data visualization experience, we recommend viewing this statistics page on a larger screen device (such as a tablet or computer).</p>
-          <button onclick="this.parentElement.parentElement.remove()">Got it</button>
-        </div>
-      `;
-      document.body.appendChild(warningModal);
-    }
-  };
-
-  checkScreenSize();
-  // Recheck on window resize
-  window.addEventListener('resize', checkScreenSize);
-
   initEventListeners();
   initDataSourceSwitch();
   fetchGitHubStats();
@@ -115,18 +95,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 async function fetchGitHubStats() {
+  const starCountEl = document.getElementById('starCount');
+  const forkCountEl = document.getElementById('forkCount');
+  if (!starCountEl || !forkCountEl) {
+    return;
+  }
+
   try {
     const response = await fetch('https://api.github.com/repos/dw-dengwei/daily-arXiv-ai-enhanced');
     const data = await response.json();
     const starCount = data.stargazers_count;
     const forkCount = data.forks_count;
     
-    document.getElementById('starCount').textContent = starCount;
-    document.getElementById('forkCount').textContent = forkCount;
+    starCountEl.textContent = starCount;
+    forkCountEl.textContent = forkCount;
   } catch (error) {
     console.error('获取GitHub统计数据失败:', error);
-    document.getElementById('starCount').textContent = '?';
-    document.getElementById('forkCount').textContent = '?';
+    starCountEl.textContent = '?';
+    forkCountEl.textContent = '?';
   }
 }
 
